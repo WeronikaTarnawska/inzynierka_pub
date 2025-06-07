@@ -1,9 +1,10 @@
-/* ==========================================================================================
- *                          This file is part of the Bachelor Thesis project
- *                                   University of Wrocław
- *                         Author: Weronika Tarnawska (Index No. 331171)
- *                                         June 2025
- * ========================================================================================== */
+/* ==================================================================================================
+ *                           This file is part of the bachelor thesis project
+ *                  Implementation and Analysis of Selected Noise Reduction Methods
+ *                                Weronika Tarnawska (Index No. 331171)
+ *                                  Supervisor:  dr hab. Paweł Woźny
+ *                                  University of Wrocław, June 2025
+ * ================================================================================================== */
 use num_complex::Complex;
 use std::f64::consts::PI;
 
@@ -27,17 +28,24 @@ impl Window {
     }
 
     /// Generate window coefficients for a given window type and frame size.
+    ///
+    /// Periodic versions of the window coefficients are used,
+    /// which means that for the given `frame_size`
+    /// coefficients for size `frame_size + 1` are actually computed
+    /// and then the last sample is dropped
+    /// (the last - dropped - sample would be the same as the first sample
+    /// in the next frame, hence "periodic").
     fn get_coefficients(&self, frame_size: usize) -> Vec<f64> {
         match self {
             Window::Hamming => (0..frame_size)
-                .map(|n| 0.54 - 0.46 * (2.0 * PI * n as f64 / (frame_size - 1) as f64).cos())
+                .map(|n| 0.54 - 0.46 * (2.0 * PI * n as f64 / frame_size as f64).cos())
                 .collect(),
             Window::Hanning => (0..frame_size)
-                .map(|n| 0.5 - 0.5 * (2.0 * PI * n as f64 / (frame_size - 1) as f64).cos())
+                .map(|n| 0.5 - 0.5 * (2.0 * PI * n as f64 / frame_size as f64).cos())
                 .collect(),
             Window::Blackman => (0..frame_size)
                 .map(|n| {
-                    let ratio = 2.0 * PI * n as f64 / (frame_size - 1) as f64;
+                    let ratio = 2.0 * PI * n as f64 / frame_size as f64;
                     0.42 - 0.50 * ratio.cos() + 0.08 * (2.0 * ratio).cos()
                 })
                 .collect(),
@@ -69,44 +77,66 @@ fn _recursive_fft(xs: &Vec<Complex<f64>>) -> Vec<Complex<f64>> {
     y
 }
 
+/// Permute the elements before iterative fft (bit reversal permutation)
+///
+/// Put's the elements in order they would be after
+/// the n==1 case in recursive variant,
+/// i.e., after dividing into even and odd for fft of size 2
+fn bit_reverse_perm(xs: &mut Vec<Complex<f64>>) {
+    let n = xs.len(); // Assuming n=2^s, bits: 1000...
+
+    // Bit reverse of 0 is 0 - it stays in place, we start from 1
+    let mut j = 0; // Bit reverse of current index i
+    for i in 1..n - 1 {
+        // Each iteration we add 1 to i
+        // So we also add 1 to it's bit reverse j, but from the back
+        let mut bit = n >> 1; // 2^{s-1}, bit reverse of 1
+        while j & bit != 0 {
+            j ^= bit; // Current bit is 1, so adding one makes it zero
+            bit >>= 1; // Next bit
+        }
+        j |= bit; // We found 0 bit so we add 1
+
+        // Swap i and it's bit reverse (only once)
+        if i < j {
+            xs.swap(i, j);
+        }
+    }
+}
+
 /// Cooley-Tukey iterative FFT implementation
 fn fft(xs: &Vec<Complex<f64>>) -> Vec<Complex<f64>> {
     let n = xs.len();
     assert!(n.is_power_of_two(), "Input length must be a power of two");
+    let mut ys = xs.clone();
+    bit_reverse_perm(&mut ys);
 
-    // Bit-reverse permutation
-    let mut output = xs.clone();
-    let mut j = 0;
-    for i in 1..n - 1 {
-        let mut bit = n >> 1;
-        while j & bit != 0 {
-            j ^= bit;
-            bit >>= 1;
-        }
-        j |= bit;
-        if i < j {
-            output.swap(i, j);
-        }
-    }
+    // We iterate over the levels of recursion
+    // First we compute all needed fft-s of size 2,
+    // then use those to compute all the needed fft-s of size 4, etc...
+    // until we can compute an fft of size n
 
-    // Iterative FFT
-    let mut len = 2;
+    let mut len = 2; // Current fft size
     while len <= n {
-        let half = len / 2;
+        let half = len / 2; // Previous fft size
         let phase_step = -2.0 * PI / len as f64;
+        // Iterate over the segments that are
+        // even terms and odd terms - fft-s of previous size
         for start in (0..n).step_by(len) {
-            for i in 0..half {
-                let angle = phase_step * i as f64;
-                let w = Complex::from_polar(1.0, angle);
-                let u = output[start + i];
-                let v = output[start + i + half] * w;
-                output[start + i] = u + v;
-                output[start + i + half] = u - v;
+            // [start..start+half] - even; [start+half..start+len] - odd
+            for k in 0..half {
+                // Combine even and odd terms (same as in the recursive variant)
+                let angle = phase_step * k as f64; // -2 pi k/N
+                let w = Complex::from_polar(1.0, angle); // e^{-i 2 pi k/N}
+                let u = ys[start + k]; // even[k]
+                let v = ys[start + k + half] * w; // twiddle * odd[k]
+                ys[start + k] = u + v; // even[k] + odd[k]*twiddle
+                ys[start + k + half] = u - v; // even[k] - odd[k]*twiddle
             }
         }
-        len <<= 1;
+        len <<= 1; // Next iteration is twice larger fft
     }
-    output
+    ys
 }
 
 /// Compute the inverse FFT (IFFT) by conjugation and scaling.
@@ -215,6 +245,38 @@ mod test {
     use float_cmp::approx_eq;
     use num_complex::Complex;
     use rustfft::FftPlanner;
+
+    #[test]
+    fn test_bit_reverse_perm_n8() {
+        let n = 8;
+        let mut v = (0..n).map(|i| Complex::new(i as f64, 0.0)).collect();
+        let expected_order = [0, 4, 2, 6, 1, 5, 3, 7];
+        bit_reverse_perm(&mut v);
+        for i in 0..n {
+            assert_eq!(
+                v[i],
+                Complex::new(expected_order[i] as f64, 0.0),
+                "Mismatch at index {}",
+                i
+            );
+        }
+    }
+
+    #[test]
+    fn test_bit_reverse_perm_n16() {
+        let n = 16;
+        let mut v = (0..n).map(|i| Complex::new(i as f64, 0.0)).collect();
+        let expected_order = [0, 8, 4, 12, 2, 10, 6, 14, 1, 9, 5, 13, 3, 11, 7, 15];
+        bit_reverse_perm(&mut v);
+        for i in 0..n {
+            assert_eq!(
+                v[i],
+                Complex::new(expected_order[i] as f64, 0.0),
+                "Mismatch at index {}",
+                i
+            );
+        }
+    }
 
     #[test]
     fn test_fft_vs_rustfft() {
@@ -330,16 +392,14 @@ mod test {
         let sample_rate = 48000.0;
 
         for sig_type in signal_types {
-            let original: Vec<f64> = generate_signal(10000, sig_type, sample_rate);
+            let original: Vec<f64> = generate_signal(20000, sig_type, sample_rate);
 
             for &frame_size in &frame_sizes {
                 for &win in &[Window::Hamming, Window::Hanning /*, Window::Rectangle*/] {
-                    let overlap = frame_size / 2;
                     let freq_dom = time2freq(&original, frame_size, win);
                     let reconstructed = freq2time(&freq_dom, win);
                     assert!(
-                        reconstructed.len() >= original.len()
-                            && reconstructed.len() <= original.len() + frame_size - overlap,
+                        reconstructed.len() >= original.len() && reconstructed.len() <= original.len() + frame_size / 2,
                         "Length mismatch for {:?}, frame {}, window {:?}: original={} vs reconstructed={}",
                         sig_type,
                         frame_size,
@@ -351,10 +411,9 @@ mod test {
                     let snr = sig_to_noise_ratio(&original, &reconstructed);
                     assert!(
                         snr > 100.0,
-                        "Signal too corrupted for {:?}, frame {}, overlap {}, window {:?} : SNR = {}",
+                        "Signal too corrupted for {:?}, frame {}, window {:?} : SNR = {}",
                         sig_type,
                         frame_size,
-                        overlap,
                         win,
                         snr
                     );

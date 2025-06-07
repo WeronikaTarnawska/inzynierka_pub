@@ -1,9 +1,10 @@
-/* ==========================================================================================
- *                          This file is part of the Bachelor Thesis project
- *                                   University of Wrocław
- *                         Author: Weronika Tarnawska (Index No. 331171)
- *                                         June 2025
- * ========================================================================================== */
+/* ==================================================================================================
+ *                           This file is part of the bachelor thesis project
+ *                  Implementation and Analysis of Selected Noise Reduction Methods
+ *                                Weronika Tarnawska (Index No. 331171)
+ *                                  Supervisor:  dr hab. Paweł Woźny
+ *                                  University of Wrocław, June 2025
+ * ================================================================================================== */
 use clap::{arg, Command};
 
 use my_dsp::fft::Window;
@@ -18,14 +19,12 @@ mod test;
 use test::run;
 
 fn main() {
-    let matches = Command::new("Audio Processing CLI")
-        .version("1.0")
-        .author("Weronika")
+    let matches = Command::new("CLI")
         .about("CLI for signal generation and denoising")
         .subcommand(
             Command::new("sig-gen")
                 .about("Generate signal and save to WAV")
-                .arg(arg!(-t --"type" <TYPE> "Noise type, e.g., white|sine,440.0|siren,300,600|randtone,0.5|chirp,200,800|chord,440.0|melody").required(true))
+                .arg(arg!(-t --"type" <TYPE> "Signal type, e.g., white|sine,440.0|siren,300,600|randtone,0.5|chirp,200,800|chord,440.0|melody").required(true))
                 .arg(arg!(-d --"duration" <DUR> "Duration in seconds").required(true))
                 .arg(arg!(-o --"out-file" <FILE> "Output WAV path").default_value("output.wav")),
         )
@@ -74,10 +73,6 @@ fn main() {
             Command::new("test")
                 .about("Run final tests"),
         )
-        .subcommand(
-            Command::new("tmp")
-                .about("Temporary: run to see what it does ;)"),
-        )
         .get_matches();
 
     match matches.subcommand() {
@@ -87,7 +82,6 @@ fn main() {
         Some(("wiener", m)) => handle_wiener(m),
         Some(("mix", m)) => handle_mix(m),
         Some(("test", _)) => run().unwrap(),
-        Some(("tmp", _)) => tmp(),
         _ => eprintln!("Unknown command. Use --help."),
     }
 }
@@ -223,8 +217,4 @@ fn parse_signal_type(s: &str) -> SignalType {
     } else {
         panic!("Unknown type: {}", s)
     }
-}
-
-fn tmp() {
-    println!("Hello :)")
 }

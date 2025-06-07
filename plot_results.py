@@ -1,13 +1,14 @@
-# ==========================================================================================
-#                         This file is part of the Bachelor Thesis project
-#                                  University of Wrocław
-#                        Author: Weronika Tarnawska (Index No. 331171)
-#                                        June 2025
-# ==========================================================================================
+# ===================================================================================================
+#                            This file is part of the bachelor thesis project
+#                   Implementation and Analysis of Selected Noise Reduction Methods
+#                                 Weronika Tarnawska (Index No. 331171)
+#                                   Supervisor:  dr hab. Paweł Woźny
+#                                   University of Wrocław, June 2025
+# ===================================================================================================
+import os
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
-import os
 
 
 def barplot(
